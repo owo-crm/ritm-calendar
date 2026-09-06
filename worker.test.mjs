@@ -18,7 +18,7 @@ test('Personal link opens the app without cookies or login and protects both cod
   assert.equal(response.status,404);assert.ok(!(await response.text()).includes('const STORE='));
  }
  const response=await handleRequest(request(),env,html);assert.equal(response.status,200);const content=await response.text();
- assert.ok(content.includes("const LIVE_URL='"+base+"'"));assert.ok(!content.includes('__RITM_ORIGIN__'));assert.ok(!content.includes('ChatGPT'));assert.ok(!content.includes('/api/login'));
+ assert.ok(content.includes("const configuredUrl='"+base+"'"));assert.ok(!content.includes('__RITM_ORIGIN__'));assert.ok(!content.includes('ChatGPT'));assert.ok(!content.includes('/api/login'));
  assert.equal(response.headers.get('referrer-policy'),'no-referrer');assert.match(response.headers.get('content-security-policy'),/frame-ancestors 'none'/);assert.equal(response.headers.get('set-cookie'),null);
  const redirect=await handleRequest(new Request(base.slice(0,-1)),env,html);assert.equal(redirect.status,308);assert.equal(redirect.headers.get('location'),base);
  assert.equal((await handleRequest(request('', 'HEAD'),env,html)).body,null);
@@ -32,7 +32,7 @@ test('JSON saves through the link API, rejects foreign origins and keeps concurr
  const read=await handleRequest(request('api/state'),env,html);assert.equal((await read.json()).revision,1);
  const unchanged=await handleRequest(request('api/state','GET',null,{'if-none-match':read.headers.get('etag')}),env,html);assert.equal(unchanged.status,304);assert.equal(unchanged.body,null);
  assert.equal(env.sql.prepare('SELECT COUNT(*) as n FROM ritm_calendars').get().n,1);
- const raw=env.sql.prepare('SELECT state_json FROM ritm_calendars').get().state_json;assert.equal(JSON.parse(raw).version,3);assert.ok(!raw.includes(testKey));
+ const raw=env.sql.prepare('SELECT state_json FROM ritm_calendars').get().state_json;assert.equal(JSON.parse(raw).version,4);assert.ok(!raw.includes(testKey));
 });
 test('Changing the link key revokes the old link and preserves the saved JSON',async()=>{
  const env=database();await handleRequest(request('api/state','PUT',{account:'calendar-owner',revision:0,state:initial()}),env,html);
@@ -41,7 +41,9 @@ test('Changing the link key revokes the old link and preserves the saved JSON',a
 });
 test('Missing configuration never starts a public writable calendar',async()=>{
  assert.equal((await handleRequest(request(),{},html)).status,404);
- assert.equal((await handleRequest(request(),{CALENDAR_KEY:testKey},html)).status,503);
+ const local=await handleRequest(request(),{CALENDAR_KEY:testKey},html);
+ assert.equal(local.status,200);
+ assert.match(await local.text(),/serverAvailable='local'==='ready'/);
  assert.equal((await handleRequest(request('api/state'),{CALENDAR_KEY:testKey,DB:{prepare(){throw Error('offline')}}},html)).status,503);
 });
 test('Two independent clients use relative APIs on the personal link and merge their changes',async()=>{

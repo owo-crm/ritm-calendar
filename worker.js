@@ -1,11 +1,12 @@
 import {syncApi} from './sync-api.js';
+import {fileApi} from './file-api.js';
 const encoder=new TextEncoder();
 const security={
   'cache-control':'private, no-store',
   'x-content-type-options':'nosniff',
   'referrer-policy':'no-referrer',
   'x-frame-options':'DENY',
-  'content-security-policy':"default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self'; font-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+  'content-security-policy':"default-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'unsafe-inline'; img-src data: blob:; connect-src 'self' blob:; font-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
   'strict-transport-security':'max-age=31536000',
 };
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{...security,'content-type':'application/json; charset=utf-8'}});
@@ -27,9 +28,20 @@ export async function handleRequest(request,env,html) {
   const match=url.pathname.match(/^\/c\/([A-Za-z0-9_-]{43})(?:\/(.*))?$/);
   if(!match||!await keyMatches(match[1],env.CALENDAR_KEY))return page(intro('Открой свою персональную ссылку. Она сразу откроет календарь на любом твоём устройстве.'),404);
   const base=`${url.origin}/c/${match[1]}/`,path=match[2]||'';
-  if(!env.DB)return json({error:'Общее хранилище календаря ещё настраивается.'},503);
   try {
+    if(path.startsWith('api/files/')) {
+      if(!env.DB)return json({error:'Общее хранилище файлов ещё настраивается.'},503);
+      return fileApi(request,env,path.slice(10));
+    }
+    if(path.startsWith('pdfjs/')&&env.ASSETS&&['GET','HEAD'].includes(request.method)){
+      const response=await env.ASSETS.fetch(new Request(url.origin+'/'+path,{method:request.method}));
+      const output=new Response(response.body,response);
+      output.headers.set('cache-control','private, max-age=86400');
+      output.headers.set('referrer-policy','no-referrer');
+      return output;
+    }
     if(path==='api/state') {
+      if(!env.DB)return json({error:'Общее хранилище календаря ещё настраивается.'},503);
       const response=await syncApi(request,env,'calendar-owner');
       for(const [key,value]of Object.entries(security))response.headers.set(key,value);
       return response;
@@ -37,7 +49,8 @@ export async function handleRequest(request,env,html) {
     if(!['','index.html','ritm-calendar.html'].includes(path))return json({error:'Страница не найдена.'},404);
     if(!['GET','HEAD'].includes(request.method))return json({error:'Метод не поддерживается.'},405);
     if(!url.pathname.endsWith('/')&&!path)return new Response(null,{status:308,headers:{...security,location:base}});
-    return page(request.method==='HEAD'?null:html.replaceAll('__RITM_ORIGIN__',base));
+    const syncReady=env.DB&&typeof env.DB.prepare==='function';
+    return page(request.method==='HEAD'?null:html.replaceAll('__RITM_ORIGIN__',base).replaceAll('__RITM_SYNC__',syncReady?'ready':'local'));
   } catch {
     return json({error:'Сервер временно недоступен. Изменения не подтверждены. Повтори попытку.'},503);
   }

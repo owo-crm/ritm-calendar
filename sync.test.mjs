@@ -25,9 +25,9 @@ test('Server and browser validate the same canonical source; script lint and loc
  const generated=fs.readFileSync(new URL('./core.js',import.meta.url),'utf8');
  assert.equal(generated,'// Generated from calendar/index.html. Keep the validation rules identical.\n'+source.slice(source.indexOf('const STORE='),source.indexOf('function storageConflict('))+'\nexport {validate,upgrade,initial};\n');
  new vm.Script(source);
- const globals=Object.fromEntries(['document','window','localStorage','structuredClone','setInterval','setTimeout','clearTimeout','FormData','URL','Blob','AbortController'].map(k=>[k,'readonly']));
+ const globals=Object.fromEntries(['document','window','localStorage','structuredClone','setInterval','setTimeout','clearTimeout','FormData','URL','Blob','AbortController','crypto','TextDecoder'].map(k=>[k,'readonly']));
  const lint=new Linter().verify(source,[{languageOptions:{ecmaVersion:'latest',sourceType:'script',globals},rules:{'no-undef':'error','no-dupe-keys':'error','no-unreachable':'error'}}]);assert.deepEqual(lint,[]);
- assert.match(html,/connect-src 'self'/);assert.match(source,/window.location.protocol==='https:'/);assert.match(source,/if\(syncEnabled\)setInterval/);
+ assert.match(html,/connect-src 'self'/);assert.match(source,/syncEnabled=serverAvailable/ );assert.match(source,/if\(syncEnabled\)setInterval/);
 });
 test('API authentication, account isolation, CSRF, body limits, schema validation, no-cache',async()=>{
  const env=database();let response=await syncApi(request('GET',null,''),env);assert.equal(response.status,401);
@@ -104,4 +104,18 @@ test('Day bar clips overnight shifts, separates sleep/work, and allocates nonove
  const m=c.dayBarModel(s,'2026-09-06'),work=m.rows.find(r=>r.key==='work'),sleep=m.rows.find(r=>r.key==='sleep');assert.equal(work.lanes,2);assert.equal(work.items[0].left,0);assert.ok(Math.abs(work.items[0].width-2/24*100)<1e-8);assert.ok(sleep.items.length);assert.equal(work.items[0].lane,0);assert.equal(work.items[1].lane,1);
  for(const row of m.rows)for(let lane=0;lane<row.lanes;lane++){const items=row.items.filter(i=>i.lane===lane);for(let i=1;i<items.length;i++)assert.ok(items[i-1].end<=items[i].start)}
  assert.equal(c.progressPercent(-10,100),0);assert.equal(c.progressPercent(150,100),100);assert.equal(c.progressPercent(1,0),0);assert.equal(c.progressPercent(NaN,100),0);assert.equal(c.progressPercent(25000,100000),25);
+});
+
+test('Reading library tracks pages, timer sessions and day-bar events',()=>{
+ const now=Date.parse(c.instant('2026-09-06T12:00'));
+ let state=c.saveBook(c.initial(),{title:'Дюна',author:'Фрэнк Герберт',pages:500,page:10,status:'reading',note:''});
+ const book=state.books[0];
+ state=c.startReading(state,book.id,Date.parse(c.instant('2026-09-06T10:00')));
+ state=c.saveReadingLog(state,{minutes:30,page:25,day:'2026-09-06',time:'',note:'Первая глава'},book.id,state.readingSession.id,now);
+ assert.equal(state.readingSession,null);
+ assert.equal(state.books[0].page,25);
+ assert.equal(state.readingLogs[0].pages,15);
+ assert.ok(state.rewards.awards.some(a=>a.id==='reading-day:2026-09-06'));
+ assert.equal(c.readingEvents(state,now).length,1);
+ assert.ok(c.dayBarModel(state,'2026-09-06',now).rows.find(r=>r.key==='reading').items.length);
 });

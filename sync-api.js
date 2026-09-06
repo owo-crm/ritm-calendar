@@ -1,13 +1,13 @@
-import { validate } from './core.js';
+import { validate, upgrade } from './core.js';
 
 export const MAX_BODY_BYTES = 750000;
-const fields = ['version','events','tasks','entries','settings','sleepLogs','sleepOverrides','routines','routineChecks','rewards','appliedUpdates'];
+const fields = ['version','events','tasks','entries','settings','sleepLogs','sleepOverrides','routines','routineChecks','rewards','appliedUpdates','books','readingLogs','readingSession'];
 const headers = {'content-type':'application/json; charset=utf-8','cache-control':'private, no-store','x-content-type-options':'nosniff','vary':'Cookie'};
 const tag = (owner,revision) => '"'+encodeURIComponent(owner)+':'+revision+'"';
 const json = (data, status=200) => new Response(JSON.stringify(data), {status,headers:{...headers,...(data.owner&&Number.isSafeInteger(data.revision)?{etag:tag(data.owner,data.revision)}:{})}});
 const clean = state => Object.fromEntries(fields.map(key=>[key,state[key]]));
 const latest = (db, owner) => db.prepare('SELECT revision, state_json, updated_at FROM ritm_calendars WHERE owner_id = ?').bind(owner).first();
-const envelope = (owner,row) => ({owner,revision:row?.revision||0,state:row?JSON.parse(row.state_json):null,updatedAt:row?.updated_at||null});
+const envelope = (owner,row) => ({owner,revision:row?.revision||0,state:row?upgrade(JSON.parse(row.state_json)):null,updatedAt:row?.updated_at||null});
 
 export async function syncApi(request, env, owner = null) {
   if (!owner) return json({error:'Открой персональную ссылку, чтобы синхронизировать записи.',code:'auth'},401);
@@ -40,7 +40,7 @@ export async function syncApi(request, env, owner = null) {
     try {
       body=JSON.parse(new TextDecoder().decode(bytes));
       if(body.account!==owner)return json({error:'Календарь изменился. Обнови страницу перед сохранением.',code:'auth'},401);
-      if(!Number.isSafeInteger(body.revision)||body.revision<0||body.state?.version!==3)throw Error('Некорректная версия данных. Обнови страницу.');
+      if(!Number.isSafeInteger(body.revision)||body.revision<0||body.state?.version!==4)throw Error('Некорректная версия данных. Обнови страницу.');
       validate(body.state);state=clean(body.state);validate(state);
     } catch(error) {return json({error:error.message||'Проверь данные.'},400)}
     const data=JSON.stringify(state),now=new Date().toISOString();
